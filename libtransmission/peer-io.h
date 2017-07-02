@@ -26,6 +26,9 @@
 #include "utils.h" /* tr_time() */
 
 struct evbuffer;
+
+struct struct_utp_context;
+
 struct tr_bandwidth;
 struct tr_datatype;
 struct tr_peerIo;
@@ -105,6 +108,8 @@ typedef struct tr_peerIo
 /**
 ***
 **/
+
+void tr_peerIoUtpInit(struct struct_utp_context* ctx);
 
 tr_peerIo* tr_peerIoNewOutgoing(
     tr_session* session,

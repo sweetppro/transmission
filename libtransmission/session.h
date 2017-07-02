@@ -47,6 +47,8 @@ void tr_peerIdInit(uint8_t* setme);
 struct event_base;
 struct evdns_base;
 
+struct struct_utp_context;
+
 struct tr_address;
 struct tr_announcer;
 struct tr_announcer_udp;
@@ -156,6 +158,7 @@ struct tr_session
     struct event* udp_event;
     struct event* udp6_event;
 
+    struct struct_utp_context* utp_context;
     struct event* utp_timer;
 
     /* The open port on the local machine for incoming peer requests */

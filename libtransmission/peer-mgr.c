@@ -2162,7 +2162,8 @@ static void close_peer_socket(struct tr_peer_socket const socket, tr_session* se
 #ifdef WITH_UTP
 
     case TR_PEER_SOCKET_TYPE_UTP:
-        UTP_Close(socket.handle.utp);
+        utp_set_userdata(socket.handle.utp, NULL);
+        utp_close(socket.handle.utp);
         break;
 
 #endif
