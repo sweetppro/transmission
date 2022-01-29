@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iterator>
+#include <iostream>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -15,6 +16,7 @@
 
 #include "transmission.h"
 
+#include "benc.h"
 #include "crypto-utils.h"
 #include "error-types.h"
 #include "error.h"
@@ -24,8 +26,8 @@
 #include "torrent-metainfo.h"
 #include "tr-assert.h"
 #include "utils.h"
-#include "variant.h"
 #include "web-utils.h"
+// #include "variant.h"
 
 using namespace std::literals;
 
@@ -154,6 +156,7 @@ std::string tr_torrent_metainfo::fixWebseedUrl(tr_torrent_metainfo const& tm, st
     return std::string{ url };
 }
 
+#if 0
 void tr_torrent_metainfo::parseWebseeds(tr_torrent_metainfo& setme, tr_variant* meta)
 {
     setme.webseed_urls_.clear();
@@ -393,7 +396,344 @@ std::string_view tr_torrent_metainfo::parseAnnounce(tr_torrent_metainfo& setme, 
 
     return {};
 }
+#endif
 
+static auto constexpr MaxBencDepth = 32;
+
+struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDepth>
+{
+    using BasicHandler = transmission::benc::BasicHandler<MaxBencDepth>;
+
+    tr_torrent_metainfo& tm_;
+    int64_t piece_size_ = 0;
+    int64_t length_ = 0;
+    std::string encoding_ = "UTF-8";
+    std::string_view info_dict_begin_;
+    tr_tracker_tier_t tier_ = 0;
+    std::string file_path_;
+    int64_t file_length_ = 0;
+
+    explicit MetainfoHandler(tr_torrent_metainfo& tm)
+        : tm_{ tm }
+    {
+    }
+
+    bool Key(std::string_view key, Context const& context) override
+    {
+        BasicHandler::Key(key, context);
+        std::cerr << __FILE__ << ':' << __LINE__ << " Key[" << key << "] depth[" << depth() << ']' << std::endl;
+        return true;
+    }
+
+    bool StartDict(Context const& context) override
+    {
+        BasicHandler::StartDict(context);
+
+        if (depth() == 2 && key(1) == "info"sv)
+        {
+            info_dict_begin_ = context.raw();
+            tm_.info_dict_offset_ = context.tokenSpan().first;
+        }
+        else if (depth() == 3 && key(1) == "info"sv && key(2) == "files"sv)
+        {
+            file_path_.clear();
+            file_length_ = 0;
+        }
+
+        std::cerr << __FILE__ << ':' << __LINE__ << " start dict, depth " << depth() << std::endl;
+        return true;
+    }
+
+    bool EndDict(Context const& context) override
+    {
+        BasicHandler::EndDict(context);
+        std::cerr << __FILE__ << ':' << __LINE__ << " end dict, depth " << depth() << std::endl;
+
+        if (depth() == 3 && key(1) == "info"sv && key(2) == "files")
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " end files dict" << std::endl;
+            tm_.files_.emplace_back(file_path_, file_length_);
+            return true;
+        }
+
+        if (depth() == 1 && key(1) == "info"sv)
+        {
+            return finishInfoDict(context);
+        }
+
+        return depth() > 0 || finish(context);
+    }
+
+    bool StartArray(Context const& context) override
+    {
+        BasicHandler::StartDict(context);
+        std::cerr << __FILE__ << ':' << __LINE__ << " start array, depth " << depth() << std::endl;
+        return true;
+    }
+
+    bool EndArray(Context const& context) override
+    {
+        BasicHandler::EndArray(context);
+        std::cerr << __FILE__ << ':' << __LINE__ << " end array, depth " << depth() << std::endl;
+
+        if (depth() == 2 && key(1) == "announce-list")
+        {
+            ++tier_;
+            std::cerr << __FILE__ << ':' << __LINE__ << " incrementing tier to " << tier_ << std::endl;
+        }
+
+        return true;
+    }
+
+    bool Int64(int64_t value, Context const& context) override
+    {
+        auto const curdepth = depth();
+        auto const curkey = currentKey();
+        auto unhandled = bool{ false };
+        std::cerr << __FILE__ << ':' << __LINE__ << " Int[" << value << "] depth[" << depth() << "] currentKey[" << curkey << ']' << std::endl;
+
+        if (curdepth == 1)
+        {
+            if (curkey == "creation date"sv)
+            {
+                tm_.date_created_ = value;
+            }
+            else if (curkey == "private"sv)
+            {
+                tm_.is_private_ = value != 0;
+            }
+            else if (curkey == "piece length"sv)
+            {
+                piece_size_ = value;
+            }
+            else
+            {
+                unhandled = true;
+            }
+        }
+        else if (curdepth == 2 && key(1) == "info"sv)
+        {
+            if (curkey == "piece length"sv)
+            {
+                piece_size_ = value;
+            }
+            else if (curkey == "private"sv)
+            {
+                tm_.is_private_ = value != 0;
+            }
+            else if (curkey == "length"sv)
+            {
+                length_ = value;
+            }
+            else
+            {
+                unhandled = true;
+            }
+        }
+        else if (curdepth == 4 && key(1) == "info"sv && key(2) == "files"sv)
+        {
+            if (curkey == "length"sv)
+            {
+                file_length_ = value;
+            }
+            else
+            {
+                unhandled = true;
+            }
+        }
+        else
+        {
+            unhandled = true;
+        }
+
+        if (unhandled && !tr_error_is_set(context.error))
+        {
+            auto const errmsg = tr_strvJoin("unexpected: key["sv, curkey, "] int["sv, std::to_string(value), "]"sv);
+            tr_error_set(context.error, EINVAL, errmsg);
+        }
+
+        return true;
+    }
+
+    bool String(std::string_view value, Context const& context) override
+    {
+        auto const curdepth = depth();
+        auto const curkey = currentKey();
+        auto unhandled = bool{ false };
+        std::cerr << __FILE__ << ':' << __LINE__ << " String[" << value << "] depth[" << depth() << "] currentKey[" << curkey << ']' << std::endl;
+
+        switch (curdepth)
+        {
+            case 1:
+#if 0
+                if (curkey == "name"sv || curkey == "name.utf-8"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.name_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
+                }
+                else
+#endif
+                if (curkey == "comment"sv || curkey == "comment.utf-8"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.comment_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got comment [" << tm_.comment_ << ']' << std::endl;
+                }
+                else if (curkey == "created by"sv || curkey == "created by.utf-8"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.creator_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got creator [" << tm_.creator_ << ']' << std::endl;
+                }
+                else if (curkey == "source"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.source_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got source [" << tm_.source_ << ']' << std::endl;
+                }
+                else if (curkey == "announce"sv)
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']' << std::endl;
+                    tm_.announceList().add(value, tier_);
+                }
+                else if (curkey == "encoding"sv)
+                {
+                    encoding_ = tr_strvStrip(value);
+                }
+                else
+                {
+                    unhandled = true;
+                }
+                break;
+
+            case 2: 
+                if (key(1) == "info"sv && curkey == "source"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.source_);
+                }
+                else if (key(1) == "info"sv && curkey == "pieces"sv)
+                {
+                    auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
+                    tm_.pieces_.resize(n);
+                    std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
+                }
+                else if (key(1) == "info"sv && (curkey == "name"sv || curkey == "name.utf-8"sv))
+                {
+                    tr_strvUtf8Clean(value, tm_.name_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
+                }
+                else
+                {
+                    unhandled = true;
+                }
+                break;
+
+            case 3:
+                if (key(1) == "announce-list")
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']' << std::endl;
+                    tm_.announceList().add(value, tier_);
+                }
+                else
+                {
+                    unhandled = true;
+                }
+                break;
+
+            default:
+                unhandled = true;
+                break;
+        }
+
+        if (unhandled && !tr_error_is_set(context.error))
+        {
+            auto const errmsg = tr_strvJoin("unexpected: key["sv, curkey, "] str["sv, value, "]"sv);
+            tr_error_set(context.error, EINVAL, errmsg);
+        }
+
+        return true;
+    }
+
+private:
+    bool finishInfoDict(Context const& context)
+    {
+        if (std::empty(info_dict_begin_))
+        {
+            tr_error_set(context.error, EINVAL, "no info_dict found");
+            return false;
+        }
+
+        TR_ASSERT(info_dict_begin_[0] == 'd');
+        TR_ASSERT(context.raw().back() == 'e');
+        char const* const begin = &info_dict_begin_.front();
+        char const* const end = &context.raw().back() + 1;
+        auto const info_dict_benc = std::string_view{ begin, size_t(end - begin) };
+        auto const hash = tr_sha1(info_dict_benc);
+        if (!hash)
+        {
+            tr_error_set(context.error, EINVAL, "bad info_dict checksum");
+        }
+        tm_.info_hash_ = *hash;
+        tm_.info_hash_str_ = tr_sha1_to_string(tm_.info_hash_);
+        tm_.info_dict_size_ = std::size(info_dict_benc);
+        std::cerr << __FILE__ << ':' << __LINE__ << " info_dict_size " << tm_.info_dict_size_ << std::endl;
+        std::cerr << __FILE__ << ':' << __LINE__ << " info_dict_offset " << tm_.info_dict_offset_ << std::endl;
+
+        // In addition, remember the offset of the pieces dictionary entry.
+        // This will be useful when we load piece checksums on demand.
+        auto constexpr Key = "6:pieces"sv;
+        auto const pit = std::search(std::begin(info_dict_benc), std::end(info_dict_benc), std::begin(Key), std::end(Key));
+        tm_.pieces_offset_ = tm_.info_dict_offset_ + std::distance(std::begin(info_dict_benc), pit) + std::size(Key);
+        std::cerr << __FILE__ << ':' << __LINE__ << " pieces_offset_ " << tm_.pieces_offset_ << std::endl;
+
+        return true;
+    }
+
+    bool finish(Context const& context)
+    {
+        std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+
+        // bittorrent 1.0 spec
+        // http://bittorrent.org/beps/bep_0003.html
+        //
+        // "There is also a key length or a key files, but not both or neither.
+        //
+        // "If length is present then the download represents a single file,
+        // otherwise it represents a set of files which go in a directory structure.
+        // In the single file case, length maps to the length of the file in bytes.
+        if (tm_.fileCount() == 0 && length_ != 0 && !std::empty(tm_.name_))
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " single file found" << std::endl;
+            tm_.files_.emplace_back(tm_.name_, length_);
+        }
+
+        if (tm_.fileCount() == 0)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+            if (!tr_error_is_set(context.error))
+            {
+                tr_error_set(context.error, EINVAL, "no files found");
+            }
+            return false;
+        }
+
+        std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+        if (piece_size_ == 0)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+            auto const errmsg = tr_strvJoin("invalid piece size: ", std::to_string(piece_size_));
+            if (!tr_error_is_set(context.error))
+            {
+                tr_error_set(context.error, EINVAL, errmsg);
+            }
+            return false;
+        }
+
+        std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+        auto const total_size = std::accumulate(std::begin(tm_.files_), std::end(tm_.files_), uint64_t{0}, [](auto const sum, auto const& file){ return sum + file.size(); });
+        tm_.block_info_.initSizes(total_size, piece_size_);
+        return true;
+    }
+};
+
+#if 0
 std::string_view tr_torrent_metainfo::parseImpl(tr_torrent_metainfo& setme, tr_variant* meta, std::string_view benc)
 {
     int64_t i = 0;
@@ -437,52 +777,6 @@ std::string_view tr_torrent_metainfo::parseImpl(tr_torrent_metainfo& setme, tr_v
         return "missing 'info' dictionary";
     }
 
-    // name
-    if (tr_variantDictFindStrView(info_dict, TR_KEY_name_utf_8, &sv) || tr_variantDictFindStrView(info_dict, TR_KEY_name, &sv))
-    {
-        tr_strvUtf8Clean(sv, setme.name_);
-    }
-    else
-    {
-        return "'info' dictionary has neither 'name.utf-8' nor 'name'";
-    }
-
-    // comment (optional)
-    setme.comment_.clear();
-    if (tr_variantDictFindStrView(meta, TR_KEY_comment_utf_8, &sv) || tr_variantDictFindStrView(meta, TR_KEY_comment, &sv))
-    {
-        tr_strvUtf8Clean(sv, setme.comment_);
-    }
-
-    // created by (optional)
-    setme.creator_.clear();
-    if (tr_variantDictFindStrView(meta, TR_KEY_created_by_utf_8, &sv) ||
-        tr_variantDictFindStrView(meta, TR_KEY_created_by, &sv))
-    {
-        tr_strvUtf8Clean(sv, setme.creator_);
-    }
-
-    // creation date (optional)
-    setme.date_created_ = tr_variantDictFindInt(meta, TR_KEY_creation_date, &i) ? i : 0;
-
-    // private (optional)
-    setme.is_private_ = (tr_variantDictFindInt(info_dict, TR_KEY_private, &i) ||
-                         tr_variantDictFindInt(meta, TR_KEY_private, &i)) &&
-        (i != 0);
-
-    // source (optional)
-    setme.source_.clear();
-    if (tr_variantDictFindStrView(info_dict, TR_KEY_source, &sv) || tr_variantDictFindStrView(meta, TR_KEY_source, &sv))
-    {
-        tr_strvUtf8Clean(sv, setme.source_);
-    }
-
-    // piece length
-    if (!tr_variantDictFindInt(info_dict, TR_KEY_piece_length, &i) && (i <= 0))
-    {
-        return "'info' dict 'piece length' is missing or has an invalid value";
-    }
-    auto const piece_size = i;
 
     // pieces
     if (!tr_variantDictFindStrView(info_dict, TR_KEY_pieces, &sv) || (std::size(sv) % sizeof(tr_sha1_digest_t) != 0))
@@ -517,21 +811,36 @@ std::string_view tr_torrent_metainfo::parseImpl(tr_torrent_metainfo& setme, tr_v
 
     return {};
 }
+#endif
 
 bool tr_torrent_metainfo::parseBenc(std::string_view benc, tr_error** error)
 {
-    auto top = tr_variant{};
-    if (!tr_variantFromBuf(&top, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, benc, nullptr, error))
+    auto stack = transmission::benc::ParserStack<MaxBencDepth>{};
+    auto handler = MetainfoHandler{ *this };
+
+    tr_error* my_error = nullptr;
+
+    if (error == nullptr)
+    {
+        error = &my_error;
+    }
+    auto const ok = transmission::benc::parse(benc, stack, handler, nullptr, error);
+    std::cerr << __FILE__ << ':' << __LINE__ << " parseBenc error is set: " << tr_error_is_set(error) << std::endl;
+
+    if (tr_error_is_set(error))
+    {
+        std::cerr << __FILE__ << ':' << __LINE__ << " (*error)->message " << (*error)->message;
+        tr_logAddError("%s", (*error)->message);
+    }
+
+    if (!ok)
     {
         return false;
     }
 
-    auto const errmsg = parseImpl(*this, &top, benc);
-    tr_variantFree(&top);
-    if (!std::empty(errmsg))
+    if (std::empty(name_))
     {
-        tr_error_set(error, TR_ERROR_EINVAL, tr_strvJoin("Error parsing metainfo: ", errmsg));
-        return false;
+        // TODO from first file
     }
 
     return true;
