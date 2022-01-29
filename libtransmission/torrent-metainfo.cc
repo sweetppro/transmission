@@ -490,7 +490,8 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         auto const curdepth = depth();
         auto const curkey = currentKey();
         auto unhandled = bool{ false };
-        std::cerr << __FILE__ << ':' << __LINE__ << " Int[" << value << "] depth[" << depth() << "] currentKey[" << curkey << ']' << std::endl;
+        std::cerr << __FILE__ << ':' << __LINE__ << " Int[" << value << "] depth[" << depth() << "] currentKey[" << curkey
+                  << ']' << std::endl;
 
         if (curdepth == 1)
         {
@@ -560,11 +561,12 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         auto const curdepth = depth();
         auto const curkey = currentKey();
         auto unhandled = bool{ false };
-        std::cerr << __FILE__ << ':' << __LINE__ << " String[" << value << "] depth[" << depth() << "] currentKey[" << curkey << ']' << std::endl;
+        std::cerr << __FILE__ << ':' << __LINE__ << " String[" << value << "] depth[" << depth() << "] currentKey[" << curkey
+                  << ']' << std::endl;
 
         switch (curdepth)
         {
-            case 1:
+        case 1:
 #if 0
                 if (curkey == "name"sv || curkey == "name.utf-8"sv)
                 {
@@ -573,73 +575,75 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 }
                 else
 #endif
-                if (curkey == "comment"sv || curkey == "comment.utf-8"sv)
-                {
-                    tr_strvUtf8Clean(value, tm_.comment_);
-                    std::cerr << __FILE__ << ':' << __LINE__ << " got comment [" << tm_.comment_ << ']' << std::endl;
-                }
-                else if (curkey == "created by"sv || curkey == "created by.utf-8"sv)
-                {
-                    tr_strvUtf8Clean(value, tm_.creator_);
-                    std::cerr << __FILE__ << ':' << __LINE__ << " got creator [" << tm_.creator_ << ']' << std::endl;
-                }
-                else if (curkey == "source"sv)
-                {
-                    tr_strvUtf8Clean(value, tm_.source_);
-                    std::cerr << __FILE__ << ':' << __LINE__ << " got source [" << tm_.source_ << ']' << std::endl;
-                }
-                else if (curkey == "announce"sv)
-                {
-                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']' << std::endl;
-                    tm_.announceList().add(value, tier_);
-                }
-                else if (curkey == "encoding"sv)
-                {
-                    encoding_ = tr_strvStrip(value);
-                }
-                else
-                {
-                    unhandled = true;
-                }
-                break;
-
-            case 2: 
-                if (key(1) == "info"sv && curkey == "source"sv)
-                {
-                    tr_strvUtf8Clean(value, tm_.source_);
-                }
-                else if (key(1) == "info"sv && curkey == "pieces"sv)
-                {
-                    auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
-                    tm_.pieces_.resize(n);
-                    std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
-                }
-                else if (key(1) == "info"sv && (curkey == "name"sv || curkey == "name.utf-8"sv))
-                {
-                    tr_strvUtf8Clean(value, tm_.name_);
-                    std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
-                }
-                else
-                {
-                    unhandled = true;
-                }
-                break;
-
-            case 3:
-                if (key(1) == "announce-list")
-                {
-                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']' << std::endl;
-                    tm_.announceList().add(value, tier_);
-                }
-                else
-                {
-                    unhandled = true;
-                }
-                break;
-
-            default:
+            if (curkey == "comment"sv || curkey == "comment.utf-8"sv)
+            {
+                tr_strvUtf8Clean(value, tm_.comment_);
+                std::cerr << __FILE__ << ':' << __LINE__ << " got comment [" << tm_.comment_ << ']' << std::endl;
+            }
+            else if (curkey == "created by"sv || curkey == "created by.utf-8"sv)
+            {
+                tr_strvUtf8Clean(value, tm_.creator_);
+                std::cerr << __FILE__ << ':' << __LINE__ << " got creator [" << tm_.creator_ << ']' << std::endl;
+            }
+            else if (curkey == "source"sv)
+            {
+                tr_strvUtf8Clean(value, tm_.source_);
+                std::cerr << __FILE__ << ':' << __LINE__ << " got source [" << tm_.source_ << ']' << std::endl;
+            }
+            else if (curkey == "announce"sv)
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']'
+                          << std::endl;
+                tm_.announceList().add(value, tier_);
+            }
+            else if (curkey == "encoding"sv)
+            {
+                encoding_ = tr_strvStrip(value);
+            }
+            else
+            {
                 unhandled = true;
-                break;
+            }
+            break;
+
+        case 2:
+            if (key(1) == "info"sv && curkey == "source"sv)
+            {
+                tr_strvUtf8Clean(value, tm_.source_);
+            }
+            else if (key(1) == "info"sv && curkey == "pieces"sv)
+            {
+                auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
+                tm_.pieces_.resize(n);
+                std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
+            }
+            else if (key(1) == "info"sv && (curkey == "name"sv || curkey == "name.utf-8"sv))
+            {
+                tr_strvUtf8Clean(value, tm_.name_);
+                std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
+            }
+            else
+            {
+                unhandled = true;
+            }
+            break;
+
+        case 3:
+            if (key(1) == "announce-list")
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']'
+                          << std::endl;
+                tm_.announceList().add(value, tier_);
+            }
+            else
+            {
+                unhandled = true;
+            }
+            break;
+
+        default:
+            unhandled = true;
+            break;
         }
 
         if (unhandled && !tr_error_is_set(context.error))
@@ -727,7 +731,11 @@ private:
         }
 
         std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
-        auto const total_size = std::accumulate(std::begin(tm_.files_), std::end(tm_.files_), uint64_t{0}, [](auto const sum, auto const& file){ return sum + file.size(); });
+        auto const total_size = std::accumulate(
+            std::begin(tm_.files_),
+            std::end(tm_.files_),
+            uint64_t{ 0 },
+            [](auto const sum, auto const& file) { return sum + file.size(); });
         tm_.block_info_.initSizes(total_size, piece_size_);
         return true;
     }
