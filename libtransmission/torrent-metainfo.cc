@@ -724,6 +724,14 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 {
                     tr_strvUtf8Clean(value, tm_.name_);
                     std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
+                    auto const token = sanitizeToken(tm_.name_);
+                    if (!std::empty(token))
+                    {
+                        for (auto& file : tm_.files_)
+                        {
+                            file.setSubpath(tr_strvJoin(token, "/"sv, file.path()));
+                        }
+                    }
                 }
                 else if (key(1) == "piece layers"sv)
                 {
