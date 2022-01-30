@@ -406,8 +406,6 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     // TODO: can we have a recycled std::string to avoid excess heap allocation
     std::vector<std::string> file_tree_;
     std::string_view pieces_root_;
-    // TODO: do we need this, can we walk tm_.files_ instead of having this heap overhead
-    std::set<std::string> added_files_;
     int64_t file_length_ = 0;
 
     enum class Mode
@@ -781,19 +779,20 @@ private:
 
         // Check to see if we already added this file. This is a safeguard for
         // hybrid torrents with duplicate info between "file tree" and "files"
-        auto const filename = buildPath();
-        if (std::empty(filename))
+        if (auto const filename = buildPath(); std::empty(filename))
         {
             auto const errmsg = tr_strvJoin("invalid path ["sv, filename, "]"sv);
             tr_error_set(context.error, EINVAL, errmsg);
             ok = false;
         }
-        else if (added_files_.count(filename) == 0)
+        else if (std::none_of(
+                     std::begin(tm_.files_),
+                     std::end(tm_.files_),
+                     [&filename](auto const& file) { return filename == file.path(); }))
         {
             std::cerr << __FILE__ << ':' << __LINE__ << " adding file [" << filename << "][" << file_length_ << ']'
                       << std::endl;
             tm_.files_.emplace_back(filename, file_length_);
-            added_files_.emplace(filename);
         }
 
         file_length_ = 0;
