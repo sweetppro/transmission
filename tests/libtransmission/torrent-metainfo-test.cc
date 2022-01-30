@@ -80,6 +80,7 @@ TEST_F(TorrentMetainfoTest, bucket)
     for (auto const& test : tests)
     {
         auto metainfo = tr_torrent_metainfo{};
+        std::cerr << "benc [" << test.benc << ']' << std::endl;
         EXPECT_EQ(test.expected_parse_result, metainfo.parseBenc(test.benc));
     }
 }

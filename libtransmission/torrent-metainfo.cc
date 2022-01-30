@@ -180,12 +180,12 @@ void tr_torrent_metainfo::parseWebseeds(tr_torrent_metainfo& setme, tr_variant* 
         setme.webseed_urls_.push_back(fixWebseedUrl(setme, url));
     }
 }
+#endif
 
-static bool appendSanitizedComponent(std::string& out, std::string_view in, bool* setme_is_adjusted)
+static std::string sanitizeToken(std::string_view in)
 {
-    auto const original_out_len = std::size(out);
-    auto const original_in = in;
-    *setme_is_adjusted = false;
+    // auto const original_out_len = std::size(out);
+    // auto const original_in = in;
 
     // remove leading spaces
     auto constexpr leading_test = [](unsigned char ch)
@@ -211,7 +211,7 @@ static bool appendSanitizedComponent(std::string& out, std::string_view in, bool
         auto const banned = Banned.find(ch) != std::string_view::npos || (unsigned char)ch < 0x20;
         return banned ? '_' : ch;
     };
-    auto const old_out_len = std::size(out);
+    auto out = std::string{};
     std::transform(std::begin(in), std::end(in), std::back_inserter(out), ensure_legal_char);
 
     // munge banned filenames
@@ -220,23 +220,16 @@ static bool appendSanitizedComponent(std::string& out, std::string_view in, bool
         "CON"sv,  "PRN"sv,  "AUX"sv,  "NUL"sv,  "COM1"sv, "COM2"sv, "COM3"sv, "COM4"sv, "COM5"sv, "COM6"sv, "COM7"sv,
         "COM8"sv, "COM9"sv, "LPT1"sv, "LPT2"sv, "LPT3"sv, "LPT4"sv, "LPT5"sv, "LPT6"sv, "LPT7"sv, "LPT8"sv, "LPT9"sv,
     };
-    for (auto const& name : ReservedNames)
+    if (std::find(std::begin(ReservedNames), std::end(ReservedNames), out) != std::end(ReservedNames))
     {
-        size_t const name_len = std::size(name);
-        if (evutil_ascii_strncasecmp(out.c_str() + old_out_len, std::data(name), name_len) != 0 ||
-            (out[old_out_len + name_len] != '\0' && out[old_out_len + name_len] != '.'))
-        {
-            continue;
-        }
-
-        out.insert(std::begin(out) + old_out_len + name_len, '_');
-        break;
+        out.insert(std::begin(out), '_');
     }
 
-    *setme_is_adjusted = original_in != std::string_view{ out.c_str() + original_out_len };
-    return std::size(out) > original_out_len;
+    std::cerr << __FILE__ << ':' << __LINE__ << " sanitize in [" << in << "] out [" << out << ']' << std::endl;
+    return out;
 }
 
+#if 0
 bool tr_torrent_metainfo::parsePath(std::string_view root, tr_variant* path, std::string& setme)
 {
     if (!tr_variantIsList(path))
@@ -410,8 +403,20 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     std::string encoding_ = "UTF-8";
     std::string_view info_dict_begin_;
     tr_tracker_tier_t tier_ = 0;
-    std::string file_path_;
+    // TODO: can we have a recycled std::string to avoid excess heap allocation
+    std::vector<std::string> file_tree_;
+    std::string_view pieces_root_;
+    // TODO: do we need this, can we walk tm_.files_ instead of having this heap overhead
+    std::set<std::string> added_files_;
     int64_t file_length_ = 0;
+
+    enum class Mode
+    {
+        None,
+        Files,
+        FileTree
+    };
+    Mode mode_ = Mode::None;
 
     explicit MetainfoHandler(tr_torrent_metainfo& tm)
         : tm_{ tm }
@@ -429,14 +434,29 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     {
         BasicHandler::StartDict(context);
 
+        std::cerr << __FILE__ << ':' << __LINE__ << " in StartDict, depth is " << depth() << " and currentKey is "
+                  << currentKey() << std::endl;
+
+        if (mode_ == Mode::FileTree)
+        {
+            auto const token = sanitizeToken(key(depth() - 1));
+            if (!std::empty(token))
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " adding to file_tree_ [" << token << ']' << std::endl;
+                file_tree_.emplace_back(token);
+            }
+        }
+
         if (depth() == 2 && key(1) == "info"sv)
         {
             info_dict_begin_ = context.raw();
             tm_.info_dict_offset_ = context.tokenSpan().first;
         }
-        else if (depth() == 3 && key(1) == "info"sv && key(2) == "files"sv)
+        else if (depth() == 3 && key(1) == "info"sv && key(2) == "file tree"sv)
         {
-            file_path_.clear();
+            std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'file tree'" << std::endl;
+            mode_ = Mode::FileTree;
+            file_tree_.clear();
             file_length_ = 0;
         }
 
@@ -449,10 +469,36 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         BasicHandler::EndDict(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " end dict, depth " << depth() << std::endl;
 
-        if (depth() == 3 && key(1) == "info"sv && key(2) == "files")
+        if (mode_ == Mode::FileTree) // bittorrent v2 format
         {
-            std::cerr << __FILE__ << ':' << __LINE__ << " end files dict" << std::endl;
-            tm_.files_.emplace_back(file_path_, file_length_);
+            if (!addFile(context))
+            {
+                return false;
+            }
+
+            auto const n = std::size(file_tree_);
+            if (n > 0)
+            {
+                file_tree_.resize(n - 1);
+            }
+
+            if (key(depth()) == "file tree"sv)
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " changing mode from 'file tree' to 'none'" << std::endl;
+                mode_ = Mode::None;
+            }
+
+            return true;
+        }
+
+        if (mode_ == Mode::Files) // bittorrent v1 format
+        {
+            if (!addFile(context))
+            {
+                return false;
+            }
+
+            file_tree_.clear();
             return true;
         }
 
@@ -468,6 +514,14 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     {
         BasicHandler::StartDict(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " start array, depth " << depth() << std::endl;
+
+        if (depth() == 3 && key(1) == "info"sv && key(2) == "files"sv)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'files'" << std::endl;
+            mode_ = Mode::Files;
+            file_tree_.clear();
+            file_length_ = 0;
+        }
         return true;
     }
 
@@ -475,6 +529,13 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     {
         BasicHandler::EndArray(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " end array, depth " << depth() << std::endl;
+
+        if (mode_ == Mode::Files && key(depth()) == "files"sv) // bittorrent v1 format
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " changing mode from 'files' to 'none'" << std::endl;
+            mode_ = Mode::None;
+            return true;
+        }
 
         if (depth() == 2 && key(1) == "announce-list")
         {
@@ -509,6 +570,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             }
             else
             {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
                 unhandled = true;
             }
         }
@@ -526,12 +588,18 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             {
                 length_ = value;
             }
+            else if (curkey == "meta version")
+            {
+                // currently unused. TODO support for bittorrent v2
+                // TODO https://github.com/transmission/transmission/issues/458
+            }
             else
             {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
                 unhandled = true;
             }
         }
-        else if (curdepth == 4 && key(1) == "info"sv && key(2) == "files"sv)
+        else if (mode_ == Mode::FileTree || mode_ == Mode::Files)
         {
             if (curkey == "length"sv)
             {
@@ -539,11 +607,13 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             }
             else
             {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
                 unhandled = true;
             }
         }
         else
         {
+            std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
             unhandled = true;
         }
 
@@ -564,86 +634,130 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         std::cerr << __FILE__ << ':' << __LINE__ << " String[" << value << "] depth[" << depth() << "] currentKey[" << curkey
                   << ']' << std::endl;
 
-        switch (curdepth)
+        if (mode_ == Mode::FileTree)
         {
-        case 1:
+            if (curkey == "attr"sv || curkey == "pieces root"sv)
+            {
+                // currently unused. TODO support for bittorrent v2
+                // TODO https://github.com/transmission/transmission/issues/458
+            }
+            else
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
+                unhandled = true;
+            }
+        }
+        else if (mode_ == Mode::Files)
+        {
+            if (curdepth > 1 && key(curdepth - 1) == "path"sv)
+            {
+                auto const token = sanitizeToken(value);
+                std::cerr << __FILE__ << ':' << __LINE__ << " in files mode, appending token [" << token << ']' << std::endl;
+                file_tree_.emplace_back(token);
+            }
+            else if (curkey == "attr"sv)
+            {
+                // currently unused. TODO support for bittorrent v2
+                // TODO https://github.com/transmission/transmission/issues/458
+            }
+            else
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
+                unhandled = true;
+            }
+        }
+        else
+        {
+            switch (curdepth)
+            {
+            case 1:
 #if 0
-                if (curkey == "name"sv || curkey == "name.utf-8"sv)
+                    if (curkey == "name"sv || curkey == "name.utf-8"sv)
+                    {
+                        tr_strvUtf8Clean(value, tm_.name_);
+                        std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
+                    }
+                    else
+#endif
+                if (curkey == "comment"sv || curkey == "comment.utf-8"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.comment_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got comment [" << tm_.comment_ << ']' << std::endl;
+                }
+                else if (curkey == "created by"sv || curkey == "created by.utf-8"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.creator_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got creator [" << tm_.creator_ << ']' << std::endl;
+                }
+                else if (curkey == "source"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.source_);
+                    std::cerr << __FILE__ << ':' << __LINE__ << " got source [" << tm_.source_ << ']' << std::endl;
+                }
+                else if (curkey == "announce"sv)
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_
+                              << ']' << std::endl;
+                    tm_.announceList().add(value, tier_);
+                }
+                else if (curkey == "encoding"sv)
+                {
+                    encoding_ = tr_strvStrip(value);
+                }
+                else
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
+                    unhandled = true;
+                }
+                break;
+
+            case 2:
+                if (key(1) == "info"sv && curkey == "source"sv)
+                {
+                    tr_strvUtf8Clean(value, tm_.source_);
+                }
+                else if (key(1) == "info"sv && curkey == "pieces"sv)
+                {
+                    auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
+                    tm_.pieces_.resize(n);
+                    std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
+                }
+                else if (key(1) == "info"sv && (curkey == "name"sv || curkey == "name.utf-8"sv))
                 {
                     tr_strvUtf8Clean(value, tm_.name_);
                     std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
                 }
+                else if (key(1) == "piece layers"sv)
+                {
+                    // currently unused. TODO support for bittorrent v2
+                    // TODO https://github.com/transmission/transmission/issues/458
+                }
                 else
-#endif
-            if (curkey == "comment"sv || curkey == "comment.utf-8"sv)
-            {
-                tr_strvUtf8Clean(value, tm_.comment_);
-                std::cerr << __FILE__ << ':' << __LINE__ << " got comment [" << tm_.comment_ << ']' << std::endl;
-            }
-            else if (curkey == "created by"sv || curkey == "created by.utf-8"sv)
-            {
-                tr_strvUtf8Clean(value, tm_.creator_);
-                std::cerr << __FILE__ << ':' << __LINE__ << " got creator [" << tm_.creator_ << ']' << std::endl;
-            }
-            else if (curkey == "source"sv)
-            {
-                tr_strvUtf8Clean(value, tm_.source_);
-                std::cerr << __FILE__ << ':' << __LINE__ << " got source [" << tm_.source_ << ']' << std::endl;
-            }
-            else if (curkey == "announce"sv)
-            {
-                std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']'
-                          << std::endl;
-                tm_.announceList().add(value, tier_);
-            }
-            else if (curkey == "encoding"sv)
-            {
-                encoding_ = tr_strvStrip(value);
-            }
-            else
-            {
-                unhandled = true;
-            }
-            break;
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
+                    unhandled = true;
+                }
+                break;
 
-        case 2:
-            if (key(1) == "info"sv && curkey == "source"sv)
-            {
-                tr_strvUtf8Clean(value, tm_.source_);
-            }
-            else if (key(1) == "info"sv && curkey == "pieces"sv)
-            {
-                auto const n = std::size(value) / sizeof(tr_sha1_digest_t);
-                tm_.pieces_.resize(n);
-                std::copy_n(std::data(value), std::size(value), reinterpret_cast<char*>(std::data(tm_.pieces_)));
-            }
-            else if (key(1) == "info"sv && (curkey == "name"sv || curkey == "name.utf-8"sv))
-            {
-                tr_strvUtf8Clean(value, tm_.name_);
-                std::cerr << __FILE__ << ':' << __LINE__ << " got name [" << tm_.name_ << ']' << std::endl;
-            }
-            else
-            {
-                unhandled = true;
-            }
-            break;
+            case 3:
+                if (key(1) == "announce-list")
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_
+                              << ']' << std::endl;
+                    tm_.announceList().add(value, tier_);
+                }
+                else
+                {
+                    std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
+                    unhandled = true;
+                }
+                break;
 
-        case 3:
-            if (key(1) == "announce-list")
-            {
-                std::cerr << __FILE__ << ':' << __LINE__ << " adding announce url [" << value << "] to tier [" << tier_ << ']'
-                          << std::endl;
-                tm_.announceList().add(value, tier_);
-            }
-            else
-            {
+            default:
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting unhandled to true" << std::endl;
                 unhandled = true;
+                break;
             }
-            break;
-
-        default:
-            unhandled = true;
-            break;
         }
 
         if (unhandled && !tr_error_is_set(context.error))
@@ -656,6 +770,59 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     }
 
 private:
+    [[nodiscard]] bool addFile(Context const& context)
+    {
+        int ok = true;
+
+        if (file_length_ == 0)
+        {
+            return ok;
+        }
+
+        // Check to see if we already added this file. This is a safeguard for
+        // hybrid torrents with duplicate info between "file tree" and "files"
+        auto const filename = buildPath();
+        if (std::empty(filename))
+        {
+            auto const errmsg = tr_strvJoin("invalid path ["sv, filename, "]"sv);
+            tr_error_set(context.error, EINVAL, errmsg);
+            ok = false;
+        }
+        else if (added_files_.count(filename) == 0)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " adding file [" << filename << "][" << file_length_ << ']'
+                      << std::endl;
+            tm_.files_.emplace_back(filename, file_length_);
+            added_files_.emplace(filename);
+        }
+
+        file_length_ = 0;
+        pieces_root_ = {};
+        // NB: let caller decide how to clear file_tree_.
+        // if we're in "files" mode we clear it; if in "file tree" we pop it
+        return ok;
+    }
+
+    [[nodiscard]] std::string buildPath() const
+    {
+        auto path = std::string{};
+        for (auto const& token : file_tree_)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " token [" << token << ']' << std::endl;
+            path += token;
+            if (!std::empty(token))
+            {
+                path += '/';
+            }
+        }
+        auto const n = std::size(path);
+        if (n > 0)
+        {
+            path.resize(n - 1);
+        }
+        return path;
+    }
+
     bool finishInfoDict(Context const& context)
     {
         if (std::empty(info_dict_begin_))
@@ -730,12 +897,19 @@ private:
             return false;
         }
 
-        std::cerr << __FILE__ << ':' << __LINE__ << std::endl;
+        std::cerr << __FILE__ << ':' << __LINE__ << " walking files " << std::endl;
+        for (auto const& file : tm_.files_)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " filename [" << file.path() << "] size[" << file.size() << ']'
+                      << std::endl;
+        }
         auto const total_size = std::accumulate(
             std::begin(tm_.files_),
             std::end(tm_.files_),
             uint64_t{ 0 },
             [](auto const sum, auto const& file) { return sum + file.size(); });
+        std::cerr << __FILE__ << ':' << __LINE__ << " total_size[" << total_size << "] piece_size_[" << piece_size_ << ']'
+                  << std::endl;
         tm_.block_info_.initSizes(total_size, piece_size_);
         return true;
     }
