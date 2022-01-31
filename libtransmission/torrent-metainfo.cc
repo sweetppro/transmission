@@ -408,13 +408,15 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     std::string_view pieces_root_;
     int64_t file_length_ = 0;
 
-    enum class Mode
+    enum class State
     {
-        None,
+        Top,
+        Info,
+        FileTree,
         Files,
-        FileTree
+        FilesIgnored,
     };
-    Mode mode_ = Mode::None;
+    State state_ = State::Top;
 
     explicit MetainfoHandler(tr_torrent_metainfo& tm)
         : tm_{ tm }
@@ -435,7 +437,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         std::cerr << __FILE__ << ':' << __LINE__ << " in StartDict, depth is " << depth() << " and currentKey is "
                   << currentKey() << std::endl;
 
-        if (mode_ == Mode::FileTree)
+        if (state_ == State::FileTree)
         {
             auto const token = sanitizeToken(key(depth() - 1));
             if (!std::empty(token))
@@ -444,16 +446,16 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 file_tree_.emplace_back(token);
             }
         }
-
-        if (depth() == 2 && key(1) == "info"sv)
+        else if (state_ == State::Top && depth() == 2 && key(1) == "info"sv)
         {
             info_dict_begin_ = context.raw();
             tm_.info_dict_offset_ = context.tokenSpan().first;
+            state_ = State::Info;
         }
-        else if (depth() == 3 && key(1) == "info"sv && key(2) == "file tree"sv)
+        else if (state_ == State::Info && key(depth() - 1) == "file tree"sv)
         {
             std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'file tree'" << std::endl;
-            mode_ = Mode::FileTree;
+            state_ = State::FileTree;
             file_tree_.clear();
             file_length_ = 0;
         }
@@ -467,7 +469,13 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         BasicHandler::EndDict(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " end dict, depth " << depth() << std::endl;
 
-        if (mode_ == Mode::FileTree) // bittorrent v2 format
+        if (state_ == State::Info && key(depth()) == "info"sv)
+        {
+            state_ = State::Top;
+            return finishInfoDict(context);
+        }
+
+        if (state_ == State::FileTree) // bittorrent v2 format
         {
             if (!addFile(context))
             {
@@ -483,13 +491,13 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             if (key(depth()) == "file tree"sv)
             {
                 std::cerr << __FILE__ << ':' << __LINE__ << " changing mode from 'file tree' to 'none'" << std::endl;
-                mode_ = Mode::None;
+                state_ = State::Info;
             }
 
             return true;
         }
 
-        if (mode_ == Mode::Files) // bittorrent v1 format
+        if (state_ == State::Files) // bittorrent v1 format
         {
             if (!addFile(context))
             {
@@ -500,25 +508,29 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             return true;
         }
 
-        if (depth() == 1 && key(1) == "info"sv)
-        {
-            return finishInfoDict(context);
-        }
-
         return depth() > 0 || finish(context);
     }
 
     bool StartArray(Context const& context) override
     {
-        BasicHandler::StartDict(context);
+        BasicHandler::StartArray(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " start array, depth " << depth() << std::endl;
 
-        if (depth() == 3 && key(1) == "info"sv && key(2) == "files"sv)
+        if (state_ == State::Info && key(depth() - 1) == "files"sv)
         {
-            std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'files'" << std::endl;
-            mode_ = Mode::Files;
-            file_tree_.clear();
-            file_length_ = 0;
+            if (!std::empty(tm_.files_))
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " already have files from 'file list'; ignoring 'files'"
+                          << std::endl;
+                state_ = State::FilesIgnored;
+            }
+            else
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'files'" << std::endl;
+                state_ = State::Files;
+                file_tree_.clear();
+                file_length_ = 0;
+            }
         }
         return true;
     }
@@ -528,10 +540,10 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         BasicHandler::EndArray(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " end array, depth " << depth() << std::endl;
 
-        if (mode_ == Mode::Files && key(depth()) == "files"sv) // bittorrent v1 format
+        if ((state_ == State::Files || state_ == State::FilesIgnored) && key(depth()) == "files"sv) // bittorrent v1 format
         {
             std::cerr << __FILE__ << ':' << __LINE__ << " changing mode from 'files' to 'none'" << std::endl;
-            mode_ = Mode::None;
+            state_ = State::Info;
             return true;
         }
 
@@ -552,7 +564,11 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         std::cerr << __FILE__ << ':' << __LINE__ << " Int[" << value << "] depth[" << depth() << "] currentKey[" << curkey
                   << ']' << std::endl;
 
-        if (curdepth == 1)
+        if (state_ == State::FilesIgnored)
+        {
+            // no-op
+        }
+        else if (curdepth == 1)
         {
             if (curkey == "creation date"sv)
             {
@@ -597,7 +613,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 unhandled = true;
             }
         }
-        else if (mode_ == Mode::FileTree || mode_ == Mode::Files)
+        else if (state_ == State::FileTree || state_ == State::Files)
         {
             if (curkey == "length"sv)
             {
@@ -632,7 +648,11 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         std::cerr << __FILE__ << ':' << __LINE__ << " String[" << value << "] depth[" << depth() << "] currentKey[" << curkey
                   << ']' << std::endl;
 
-        if (mode_ == Mode::FileTree)
+        if (state_ == State::FilesIgnored)
+        {
+            // no-op
+        }
+        else if (state_ == State::FileTree)
         {
             if (curkey == "attr"sv || curkey == "pieces root"sv)
             {
@@ -645,7 +665,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 unhandled = true;
             }
         }
-        else if (mode_ == Mode::Files)
+        else if (state_ == State::Files)
         {
             if (curdepth > 1 && key(curdepth - 1) == "path"sv)
             {
@@ -793,10 +813,7 @@ private:
             tr_error_set(context.error, EINVAL, errmsg);
             ok = false;
         }
-        else if (std::none_of(
-                     std::begin(tm_.files_),
-                     std::end(tm_.files_),
-                     [&filename](auto const& file) { return filename == file.path(); }))
+        else
         {
             std::cerr << __FILE__ << ':' << __LINE__ << " adding file [" << filename << "][" << file_length_ << ']'
                       << std::endl;
