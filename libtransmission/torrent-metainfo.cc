@@ -415,6 +415,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         FileTree,
         Files,
         FilesIgnored,
+        PieceLayers,
     };
     State state_ = State::Top;
 
@@ -446,15 +447,24 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
                 file_tree_.emplace_back(token);
             }
         }
-        else if (state_ == State::Top && depth() == 2 && key(1) == "info"sv)
+        else if (state_ == State::Top && depth() == 2)
         {
-            info_dict_begin_ = context.raw();
-            tm_.info_dict_offset_ = context.tokenSpan().first;
-            state_ = State::Info;
+            if (key(1) == "info"sv)
+            {
+                info_dict_begin_ = context.raw();
+                tm_.info_dict_offset_ = context.tokenSpan().first;
+                std::cerr << __FILE__ << ':' << __LINE__ << " changing state from 'top' to 'info'" << std::endl;
+                state_ = State::Info;
+            }
+            else if (key(1) == "piece layers"sv)
+            {
+                std::cerr << __FILE__ << ':' << __LINE__ << " changing state from 'top' to 'piece layers'" << std::endl;
+                state_ = State::PieceLayers;
+            }
         }
         else if (state_ == State::Info && key(depth() - 1) == "file tree"sv)
         {
-            std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'file tree'" << std::endl;
+            std::cerr << __FILE__ << ':' << __LINE__ << " changing state from 'info' to 'file tree" << std::endl;
             state_ = State::FileTree;
             file_tree_.clear();
             file_length_ = 0;
@@ -469,10 +479,24 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         BasicHandler::EndDict(context);
         std::cerr << __FILE__ << ':' << __LINE__ << " end dict, depth " << depth() << std::endl;
 
+        if (state_ == State::Top)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " finishing" << std::endl;
+            return finish(context);
+        }
+
         if (state_ == State::Info && key(depth()) == "info"sv)
         {
+            std::cerr << __FILE__ << ':' << __LINE__ << " changing state from 'info' to 'top'" << std::endl;
             state_ = State::Top;
             return finishInfoDict(context);
+        }
+
+        if (state_ == State::PieceLayers && key(depth()) == "piece layers"sv)
+        {
+            std::cerr << __FILE__ << ':' << __LINE__ << " changing state from 'piece layers' to 'top'" << std::endl;
+            state_ = State::Top;
+            return true;
         }
 
         if (state_ == State::FileTree) // bittorrent v2 format
@@ -508,7 +532,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             return true;
         }
 
-        return depth() > 0 || finish(context);
+        return depth() > 0;
     }
 
     bool StartArray(Context const& context) override
@@ -520,13 +544,12 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         {
             if (!std::empty(tm_.files_))
             {
-                std::cerr << __FILE__ << ':' << __LINE__ << " already have files from 'file list'; ignoring 'files'"
-                          << std::endl;
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting mode from 'info' to 'files ignored'" << std::endl;
                 state_ = State::FilesIgnored;
             }
             else
             {
-                std::cerr << __FILE__ << ':' << __LINE__ << " setting mode to 'files'" << std::endl;
+                std::cerr << __FILE__ << ':' << __LINE__ << " setting mode from 'info' to 'files'" << std::endl;
                 state_ = State::Files;
                 file_tree_.clear();
                 file_length_ = 0;
