@@ -7,9 +7,8 @@
 #include <cerrno> /* error codes ERANGE, ... */
 #include <climits> /* INT_MAX */
 #include <cstdlib> /* qsort */
-#include <cstring> /* memcpy, memcmp, strstr */
-#include <ctime>
-#include <iterator>
+#include <ctime> // time_t
+#include <iterator> // std::back_inserter
 #include <vector>
 
 #include <event2/event.h>
@@ -20,6 +19,7 @@
 #define LIBTRANSMISSION_PEER_MODULE
 
 #include "transmission.h"
+
 #include "announcer.h"
 #include "bandwidth.h"
 #include "blocklist.h"
@@ -31,9 +31,9 @@
 #include "log.h"
 #include "net.h"
 #include "peer-io.h"
-#include "peer-mgr.h"
 #include "peer-mgr-active-requests.h"
 #include "peer-mgr-wishlist.h"
+#include "peer-mgr.h"
 #include "peer-msgs.h"
 #include "ptrarray.h"
 #include "session.h"
@@ -668,7 +668,7 @@ static void refillUpkeep(evutil_socket_t /*fd*/, short /*what*/, void* vmgr)
     tr_timerAddMsec(mgr->refillUpkeepTimer, RefillUpkeepPeriodMsec);
 }
 
-static void addStrike(tr_swarm* s, tr_peer* peer)
+static void addStrike(tr_swarm const* s, tr_peer* peer)
 {
     tordbg(s, "increasing peer %s strike count to %d", tr_atomAddrStr(peer->atom), peer->strikes + 1);
 
@@ -681,7 +681,11 @@ static void addStrike(tr_swarm* s, tr_peer* peer)
     }
 }
 
-static void peerSuggestedPiece(tr_swarm* /*s*/, tr_peer* /*peer*/, tr_piece_index_t /*pieceIndex*/, int /*isFastAllowed*/)
+static void peerSuggestedPiece(
+    tr_swarm const* /*s*/,
+    tr_peer const* /*peer*/,
+    tr_piece_index_t /*pieceIndex*/,
+    int /*isFastAllowed*/)
 {
 #if 0
 
@@ -1171,35 +1175,6 @@ size_t tr_peerMgrAddPex(tr_torrent* tor, uint8_t from, tr_pex const* pex, size_t
     return n_used;
 }
 
-tr_pex* tr_peerMgrCompactToPex(
-    void const* compact,
-    size_t compactLen,
-    uint8_t const* added_f,
-    size_t added_f_len,
-    size_t* pexCount)
-{
-    size_t n = compactLen / 6;
-    auto const* walk = static_cast<uint8_t const*>(compact);
-    auto* const pex = tr_new0(tr_pex, n);
-
-    for (size_t i = 0; i < n; ++i)
-    {
-        pex[i].addr.type = TR_AF_INET;
-        memcpy(&pex[i].addr.addr, walk, 4);
-        walk += 4;
-        memcpy(&pex[i].port, walk, 2);
-        walk += 2;
-
-        if (added_f != nullptr && n == added_f_len)
-        {
-            pex[i].flags = added_f[i];
-        }
-    }
-
-    *pexCount = n;
-    return pex;
-}
-
 std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLen, uint8_t const* added_f, size_t added_f_len)
 {
     size_t n = compactLen / 6;
@@ -1220,35 +1195,6 @@ std::vector<tr_pex> tr_peerMgrCompactToPex(void const* compact, size_t compactLe
         }
     }
 
-    return pex;
-}
-
-tr_pex* tr_peerMgrCompact6ToPex(
-    void const* compact,
-    size_t compactLen,
-    uint8_t const* added_f,
-    size_t added_f_len,
-    size_t* pexCount)
-{
-    size_t n = compactLen / 18;
-    auto const* walk = static_cast<uint8_t const*>(compact);
-    auto* const pex = tr_new0(tr_pex, n);
-
-    for (size_t i = 0; i < n; ++i)
-    {
-        pex[i].addr.type = TR_AF_INET6;
-        memcpy(&pex[i].addr.addr.addr6.s6_addr, walk, 16);
-        walk += 16;
-        memcpy(&pex[i].port, walk, 2);
-        walk += 2;
-
-        if (added_f != nullptr && n == added_f_len)
-        {
-            pex[i].flags = added_f[i];
-        }
-    }
-
-    *pexCount = n;
     return pex;
 }
 
@@ -1612,7 +1558,7 @@ void tr_peerMgrTorrentAvailability(tr_torrent const* tor, int8_t* tab, unsigned 
     TR_ASSERT(tab != nullptr);
     TR_ASSERT(tabCount > 0);
 
-    memset(tab, 0, tabCount);
+    std::fill_n(tab, tabCount, int8_t{});
 
     if (tor->hasMetadata())
     {
@@ -1884,7 +1830,7 @@ void tr_peerMgrClearInterest(tr_torrent* tor)
 }
 
 /* does this peer have any pieces that we want? */
-static bool isPeerInteresting(tr_torrent* const tor, bool const* const piece_is_interesting, tr_peer const* const peer)
+static bool isPeerInteresting(tr_torrent const* const tor, bool const* const piece_is_interesting, tr_peer const* const peer)
 {
     /* these cases should have already been handled by the calling code... */
     TR_ASSERT(!tor->isDone());
@@ -2459,12 +2405,11 @@ static void closePeer(tr_peer* peer)
 {
     TR_ASSERT(peer != nullptr);
     auto* const s = peer->swarm;
-    peer_atom* const atom = peer->atom;
 
     /* if we transferred piece data, then they might be good peers,
        so reset their `numFails' weight to zero. otherwise we connected
        to them fruitlessly, so mark it as another fail */
-    if (atom->piece_data_time != 0)
+    if (auto* const atom = peer->atom; atom->piece_data_time != 0)
     {
         tordbg(s, "resetting atom %s numFails to 0", tr_atomAddrStr(atom));
         atom->numFails = 0;
@@ -2998,7 +2943,7 @@ static bool swarmIsAllSeeds(tr_swarm* swarm)
 }
 
 /** @return an array of all the atoms we might want to connect to */
-static std::vector<peer_candidate> getPeerCandidates(tr_session* session, size_t max)
+static std::vector<peer_candidate> getPeerCandidates(tr_session const* session, size_t max)
 {
     time_t const now = tr_time();
     uint64_t const now_msec = tr_time_msec();

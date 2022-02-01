@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,7 +25,6 @@
 #include "log.h"
 #include "net.h" /* tr_address */
 #include "torrent.h"
-#include "platform.h" /* mutex */
 #include "session.h"
 #include "tr-assert.h"
 #include "tr-macros.h"
@@ -342,8 +342,7 @@ static struct tr_web_task* tr_webRunImpl(
     {
         if (session->web == nullptr)
         {
-            tr_threadNew(tr_webThreadFunc, session);
-
+            std::thread(tr_webThreadFunc, session).detach();
             while (session->web == nullptr)
             {
                 tr_wait_msec(20);
@@ -423,8 +422,7 @@ static void tr_webThreadFunc(void* vsession)
         tr_logAddNamedInfo("web", "NB: invalid certs will show up as 'Could not connect to tracker' like many other errors");
     }
 
-    auto const str = tr_strvPath(session->config_dir, "cookies.txt");
-    if (tr_sys_path_exists(str.c_str(), nullptr))
+    if (auto const str = tr_strvPath(session->config_dir, "cookies.txt"); tr_sys_path_exists(str.c_str(), nullptr))
     {
         web->cookie_filename = tr_strvDup(str);
     }
