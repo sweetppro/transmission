@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -10,6 +10,7 @@
 #include <iterator>
 #include <numeric>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <libdeflate.h>
@@ -812,7 +813,7 @@ static void initField(tr_torrent const* const tor, tr_stat const* const st, tr_v
             tr_variantInitList(initme, n);
             for (tr_file_index_t i = 0; i < n; ++i)
             {
-                tr_variantListAddInt(initme, tr_torrentFile(tor, i).wanted);
+                tr_variantListAddBool(initme, tr_torrentFile(tor, i).wanted);
             }
         }
         break;
@@ -933,10 +934,9 @@ static char const* torrentGet(tr_session* session, tr_variant* args_in, tr_varia
 ****
 ***/
 
-static char const* setLabels(tr_torrent* tor, tr_variant* list)
+static std::pair<tr_labels_t, char const* /*errmsg*/> makeLabels(tr_variant* list)
 {
     auto labels = tr_labels_t{};
-
     size_t const n = tr_variantListSize(list);
     for (size_t i = 0; i < n; ++i)
     {
@@ -949,15 +949,27 @@ static char const* setLabels(tr_torrent* tor, tr_variant* list)
         label = tr_strvStrip(label);
         if (std::empty(label))
         {
-            return "labels cannot be empty";
+            return { {}, "labels cannot be empty" };
         }
 
         if (tr_strvContains(label, ','))
         {
-            return "labels cannot contain comma (,) character";
+            return { {}, "labels cannot contain comma (,) character" };
         }
 
         labels.emplace(label);
+    }
+
+    return { labels, nullptr };
+}
+
+static char const* setLabels(tr_torrent* tor, tr_variant* list)
+{
+    auto [labels, errmsg] = makeLabels(list);
+
+    if (errmsg != nullptr)
+    {
+        return errmsg;
     }
 
     tr_torrentSetLabels(tor, std::move(labels));
@@ -1647,6 +1659,19 @@ static char const* torrentAdd(tr_session* session, tr_variant* args_in, tr_varia
         tr_ctorSetFilePriorities(ctor, std::data(files), std::size(files), TR_PRI_HIGH);
     }
 
+    if (tr_variantDictFindList(args_in, TR_KEY_labels, &l))
+    {
+        auto [labels, errmsg] = makeLabels(l);
+
+        if (errmsg != nullptr)
+        {
+            tr_ctorFree(ctor);
+            return errmsg;
+        }
+
+        tr_ctorSetLabels(ctor, std::move(labels));
+    }
+
     dbgmsg("torrentAdd: filename is \"%" TR_PRIsv "\"", TR_PRIsv_ARG(filename));
 
     if (isCurlURL(filename))
@@ -2242,8 +2267,7 @@ static void addSessionField(tr_session* s, tr_variant* d, tr_quark key)
 
 static char const* sessionGet(tr_session* s, tr_variant* args_in, tr_variant* args_out, tr_rpc_idle_data* /*idle_data*/)
 {
-    tr_variant* fields = nullptr;
-    if (tr_variantDictFindList(args_in, TR_KEY_fields, &fields))
+    if (tr_variant* fields = nullptr; tr_variantDictFindList(args_in, TR_KEY_fields, &fields))
     {
         size_t const field_count = tr_variantListSize(fields);
 

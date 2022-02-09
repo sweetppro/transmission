@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -165,7 +165,7 @@ int tr_blocklistFileGetRuleCount(tr_blocklistFile const* b)
     return b->ruleCount;
 }
 
-bool tr_blocklistFileIsEnabled(tr_blocklistFile const* b)
+bool tr_blocklistFileIsEnabled(tr_blocklistFile* b)
 {
     return b->isEnabled;
 }
@@ -337,9 +337,14 @@ static int compareAddressRangesByFirstAddress(void const* va, void const* vb)
     auto const* a = static_cast<struct tr_ipv4_range const*>(va);
     auto const* b = static_cast<struct tr_ipv4_range const*>(vb);
 
-    if (a->begin != b->begin)
+    if (a->begin < b->begin)
     {
-        return a->begin < b->begin ? -1 : 1;
+        return -1;
+    }
+
+    if (a->begin > b->begin)
+    {
+        return 1;
     }
 
     return 0;

@@ -1,5 +1,5 @@
 // This file Copyright © 2009-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -253,7 +253,7 @@ static std::string getXdgEntryFromUserDirs(std::string_view key)
     }
 
     // search for key="val" and extract val
-    auto const search = tr_strvJoin(key, "=\""sv);
+    auto const search = tr_strvJoin(key, R"(=")");
     auto begin = std::search(std::begin(content), std::end(content), std::begin(search), std::end(search));
     if (begin == std::end(content))
     {
@@ -269,8 +269,7 @@ static std::string getXdgEntryFromUserDirs(std::string_view key)
 
     // if val contains "$HOME", replace that with getHomeDir()
     auto constexpr Home = "$HOME"sv;
-    auto const it = std::search(std::begin(val), std::end(val), std::begin(Home), std::end(Home));
-    if (it != std::end(val))
+    if (auto const it = std::search(std::begin(val), std::end(val), std::begin(Home), std::end(Home)); it != std::end(val))
     {
         val.replace(it, it + std::size(Home), std::string_view{ getHomeDir() });
     }
@@ -284,8 +283,7 @@ char const* tr_getDefaultDownloadDir()
 
     if (user_dir == nullptr)
     {
-        auto const xdg_user_dir = getXdgEntryFromUserDirs("XDG_DOWNLOAD_DIR"sv);
-        if (!std::empty(xdg_user_dir))
+        if (auto const xdg_user_dir = getXdgEntryFromUserDirs("XDG_DOWNLOAD_DIR"sv); !std::empty(xdg_user_dir))
         {
             user_dir = tr_strvDup(xdg_user_dir);
         }

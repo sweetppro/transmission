@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -454,7 +454,6 @@ static int getOptMode(int val)
     case 993: /* no-trash-torrent */
         return MODE_SESSION_SET;
 
-    case 'L': /* labels */
     case 712: /* tracker-remove */
     case 950: /* seedratio */
     case 951: /* seedratio-default */
@@ -468,6 +467,7 @@ static int getOptMode(int val)
 
     case 'g': /* get */
     case 'G': /* no-get */
+    case 'L': /* labels */
     case 700: /* torrent priority-high */
     case 701: /* torrent priority-normal */
     case 702: /* torrent priority-low */
@@ -544,7 +544,8 @@ static bool UseSSL = false;
 
 static std::string getEncodedMetainfo(char const* filename)
 {
-    if (auto contents = std::vector<char>{}; tr_loadFile(contents, filename))
+    auto contents = std::vector<char>{};
+    if (tr_loadFile(contents, filename))
     {
         return tr_base64_encode({ std::data(contents), std::size(contents) });
     }
@@ -2157,7 +2158,8 @@ static int flush(char const* rpcurl, tr_variant** benc)
         fprintf(stderr, "posting:\n--------\n%s\n--------\n", json.c_str());
     }
 
-    if (auto const res = curl_easy_perform(curl); res != CURLE_OK)
+    auto const res = curl_easy_perform(curl);
+    if (res != CURLE_OK)
     {
         tr_logAddNamedError(MyName, " (%s) %s", rpcurl_http.c_str(), curl_easy_strerror(res));
         status |= EXIT_FAILURE;
@@ -2689,10 +2691,6 @@ static int processArgs(char const* rpcurl, int argc, char const* const* argv)
 
             switch (c)
             {
-            case 'L':
-                addLabels(args, optarg ? optarg : "");
-                break;
-
             case 712:
                 {
                     tr_variant* list;
@@ -2751,6 +2749,10 @@ static int processArgs(char const* rpcurl, int argc, char const* const* argv)
 
             case 'G':
                 addFiles(args, TR_KEY_files_unwanted, optarg);
+                break;
+
+            case 'L':
+                addLabels(args, optarg ? optarg : "");
                 break;
 
             case 900:

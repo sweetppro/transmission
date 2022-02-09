@@ -1,10 +1,10 @@
 // This file Copyright © 2013-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
 #undef _GNU_SOURCE
-#define _GNU_SOURCE
+#define _GNU_SOURCE // NOLINT
 
 #include <algorithm>
 #include <array>
@@ -14,17 +14,17 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string_view>
+#include <vector>
+
 #include <dirent.h>
 #include <fcntl.h> /* O_LARGEFILE, posix_fadvise(), [posix_]fallocate(), fcntl() */
 #include <libgen.h> /* basename(), dirname() */
-#include <string_view>
-#include <unistd.h> /* lseek(), write(), ftruncate(), pread(), pwrite(), pathconf(), etc */
-#include <vector>
-
 #include <sys/file.h> /* flock() */
 #include <sys/mman.h> /* mmap(), munmap() */
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h> /* lseek(), write(), ftruncate(), pread(), pwrite(), pathconf(), etc */
 
 #ifdef HAVE_XFS_XFS_H
 #include <xfs/xfs.h>

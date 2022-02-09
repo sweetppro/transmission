@@ -1,5 +1,5 @@
 // This file Copyright © 2021-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -413,7 +413,7 @@ std::string tr_urlPercentDecode(std::string_view in)
         }
 
         in.remove_prefix(pos);
-        if (std::size(in) >= 3 && in[0] == '%' && std::isxdigit(in[1]) && std::isxdigit(in[2]))
+        if (std::size(in) >= 3 && in[0] == '%' && (std::isxdigit(in[1]) != 0) && (std::isxdigit(in[2]) != 0))
         {
             auto hexstr = std::array<char, 3>{ in[1], in[2], '\0' };
             auto const hex = strtoul(std::data(hexstr), nullptr, 16);

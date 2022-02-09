@@ -1,5 +1,5 @@
 // This file Copyright © 2009-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -118,9 +118,9 @@ Application::Application(int& argc, char** argv)
 #endif
 
     // parse the command-line arguments
-    int c;
+    int c = 0;
     bool minimized = false;
-    char const* optarg;
+    char const* optarg = nullptr;
     QString host;
     QString port;
     QString username;
@@ -175,7 +175,9 @@ Application::Application(int& argc, char** argv)
 
     // try to delegate the work to an existing copy of Transmission
     // before starting ourselves...
-    if (InteropHelper interop_client; interop_client.isConnected())
+    InteropHelper interop_client;
+
+    if (interop_client.isConnected())
     {
         bool delegated = false;
 
@@ -629,6 +631,7 @@ bool Application::notifyApp(QString const& title, QString const& body, QStringLi
             return true;
         }
     }
+
 #endif
 
     window_->trayIcon().showMessage(title, body);

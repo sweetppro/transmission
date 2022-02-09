@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -228,7 +228,7 @@ static uint64_t loadFilePriorities(tr_variant* dict, tr_torrent* tor)
 ****
 ***/
 
-static void saveSingleSpeedLimit(tr_variant* d, tr_torrent const* tor, tr_direction dir)
+static void saveSingleSpeedLimit(tr_variant* d, tr_torrent* tor, tr_direction dir)
 {
     tr_variantDictReserve(d, 3);
     tr_variantDictAddInt(d, TR_KEY_speed_Bps, tor->speedLimitBps(dir));
@@ -236,20 +236,20 @@ static void saveSingleSpeedLimit(tr_variant* d, tr_torrent const* tor, tr_direct
     tr_variantDictAddBool(d, TR_KEY_use_speed_limit, tr_torrentUsesSpeedLimit(tor, dir));
 }
 
-static void saveSpeedLimits(tr_variant* dict, tr_torrent const* tor)
+static void saveSpeedLimits(tr_variant* dict, tr_torrent* tor)
 {
     saveSingleSpeedLimit(tr_variantDictAddDict(dict, TR_KEY_speed_limit_down, 0), tor, TR_DOWN);
     saveSingleSpeedLimit(tr_variantDictAddDict(dict, TR_KEY_speed_limit_up, 0), tor, TR_UP);
 }
 
-static void saveRatioLimits(tr_variant* dict, tr_torrent const* tor)
+static void saveRatioLimits(tr_variant* dict, tr_torrent* tor)
 {
     tr_variant* d = tr_variantDictAddDict(dict, TR_KEY_ratio_limit, 2);
     tr_variantDictAddReal(d, TR_KEY_ratio_limit, tr_torrentGetRatioLimit(tor));
     tr_variantDictAddInt(d, TR_KEY_ratio_mode, tr_torrentGetRatioMode(tor));
 }
 
-static void saveIdleLimits(tr_variant* dict, tr_torrent const* tor)
+static void saveIdleLimits(tr_variant* dict, tr_torrent* tor)
 {
     tr_variant* d = tr_variantDictAddDict(dict, TR_KEY_idle_limit, 2);
     tr_variantDictAddInt(d, TR_KEY_idle_limit, tr_torrentGetIdleLimit(tor));
@@ -415,7 +415,7 @@ static uint64_t loadFilenames(tr_variant* dict, tr_torrent* tor)
 
 static void bitfieldToRaw(tr_bitfield const& b, tr_variant* benc)
 {
-    if (b.hasNone() || std::empty(b))
+    if (b.hasNone() || (std::empty(b) != 0U))
     {
         tr_variantInitStr(benc, "none"sv);
     }
@@ -573,8 +573,7 @@ static uint64_t loadProgress(tr_variant* dict, tr_torrent* tor)
 
         auto blocks = tr_bitfield{ tor->blockCount() };
         char const* err = nullptr;
-        auto sv = std::string_view{};
-        if (auto const* const b = tr_variantDictFind(prog, TR_KEY_blocks); b != nullptr)
+        if (tr_variant const* const b = tr_variantDictFind(prog, TR_KEY_blocks); b != nullptr)
         {
             uint8_t const* buf = nullptr;
             auto buflen = size_t{};
@@ -588,7 +587,7 @@ static uint64_t loadProgress(tr_variant* dict, tr_torrent* tor)
                 rawToBitfield(blocks, buf, buflen);
             }
         }
-        else if (tr_variantDictFindStrView(prog, TR_KEY_have, &sv))
+        else if (auto sv = std::string_view{}; tr_variantDictFindStrView(prog, TR_KEY_have, &sv))
         {
             if (sv == "all"sv)
             {

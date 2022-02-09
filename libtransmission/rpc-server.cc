@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -237,8 +237,7 @@ static void handle_web_client(struct evhttp_request* req, tr_rpc_server* server)
     {
         // TODO: string_view
         char* const subpath = tr_strdup(req->uri + std::size(server->url) + 4);
-        char* pch = strchr(subpath, '?');
-        if (pch != nullptr)
+        if (char* pch = strchr(subpath, '?'); pch != nullptr)
         {
             *pch = '\0';
         }
@@ -342,7 +341,7 @@ static bool isIPAddressWithOptionalPort(char const* host)
     return evutil_parse_sockaddr_port(host, (struct sockaddr*)&address, &address_len) != -1;
 }
 
-static bool isHostnameAllowed(tr_rpc_server const* server, evhttp_request const* req)
+static bool isHostnameAllowed(tr_rpc_server const* server, struct evhttp_request* req)
 {
     /* If password auth is enabled, any hostname is permitted. */
     if (server->isPasswordEnabled)
@@ -724,9 +723,9 @@ static auto parseWhitelist(std::string_view whitelist)
         auto const pos = whitelist.find_first_of(" ,;"sv);
         auto const token = tr_strvStrip(whitelist.substr(0, pos));
         list.emplace_back(token);
-        whitelist = pos == whitelist.npos ? ""sv : whitelist.substr(pos + 1);
+        whitelist = pos == std::string_view::npos ? ""sv : whitelist.substr(pos + 1);
 
-        if (token.find_first_of("+-"sv) != token.npos)
+        if (token.find_first_of("+-"sv) != std::string_view::npos)
         {
             tr_logAddNamedInfo(
                 MyName,

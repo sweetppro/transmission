@@ -1,11 +1,12 @@
 // This file Copyright © 2007-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
 #include <algorithm>
 #include <cerrno> /* error codes ERANGE, ... */
 #include <climits> /* INT_MAX */
+#include <cmath>
 #include <cstdlib> /* qsort */
 #include <ctime> // time_t
 #include <iterator> // std::back_inserter
@@ -339,7 +340,7 @@ static void swarmFree(tr_swarm* s)
     delete s;
 }
 
-static void peerCallbackFunc(tr_peer*, tr_peer_event const*, void*);
+static void peerCallbackFunc(tr_peer* /*peer*/, tr_peer_event const* /*e*/, void* /*vs*/);
 
 static void rebuildWebseedArray(tr_swarm* s, tr_torrent* tor)
 {
@@ -668,7 +669,7 @@ static void refillUpkeep(evutil_socket_t /*fd*/, short /*what*/, void* vmgr)
     tr_timerAddMsec(mgr->refillUpkeepTimer, RefillUpkeepPeriodMsec);
 }
 
-static void addStrike(tr_swarm const* s, tr_peer* peer)
+static void addStrike(tr_swarm* s, tr_peer* peer)
 {
     tordbg(s, "increasing peer %s strike count to %d", tr_atomAddrStr(peer->atom), peer->strikes + 1);
 
@@ -681,11 +682,7 @@ static void addStrike(tr_swarm const* s, tr_peer* peer)
     }
 }
 
-static void peerSuggestedPiece(
-    tr_swarm const* /*s*/,
-    tr_peer const* /*peer*/,
-    tr_piece_index_t /*pieceIndex*/,
-    int /*isFastAllowed*/)
+static void peerSuggestedPiece(tr_swarm* /*s*/, tr_peer* /*peer*/, tr_piece_index_t /*pieceIndex*/, bool /*isFastAllowed*/)
 {
 #if 0
 
@@ -1403,10 +1400,10 @@ int tr_peerMgrGetPeers(tr_torrent const* tor, tr_pex** setme_pex, uint8_t af, ui
     return count;
 }
 
-static void atomPulse(evutil_socket_t, short, void*);
-static void bandwidthPulse(evutil_socket_t, short, void*);
-static void rechokePulse(evutil_socket_t, short, void*);
-static void reconnectPulse(evutil_socket_t, short, void*);
+static void atomPulse(evutil_socket_t, short /*unused*/, void* /*vmgr*/);
+static void bandwidthPulse(evutil_socket_t, short /*unused*/, void* /*vmgr*/);
+static void rechokePulse(evutil_socket_t, short /*unused*/, void* /*vmgr*/);
+static void reconnectPulse(evutil_socket_t, short /*unused*/, void* /*vmgr*/);
 
 static struct event* createTimer(tr_session* session, int msec, event_callback_fn callback, void* cbdata)
 {
@@ -1454,7 +1451,7 @@ void tr_peerMgrStartTorrent(tr_torrent* tor)
     tr_timerAddMsec(s->manager->rechokeTimer, 100);
 }
 
-static void removeAllPeers(tr_swarm*);
+static void removeAllPeers(tr_swarm* /*swarm*/);
 
 static void stopSwarm(tr_swarm* swarm)
 {
@@ -1830,7 +1827,7 @@ void tr_peerMgrClearInterest(tr_torrent* tor)
 }
 
 /* does this peer have any pieces that we want? */
-static bool isPeerInteresting(tr_torrent const* const tor, bool const* const piece_is_interesting, tr_peer const* const peer)
+static bool isPeerInteresting(tr_torrent* const tor, bool const* const piece_is_interesting, tr_peer const* const peer)
 {
     /* these cases should have already been handled by the calling code... */
     TR_ASSERT(!tor->isDone());
@@ -2301,7 +2298,7 @@ static bool shouldPeerBeClosed(tr_swarm const* s, tr_peer const* peer, int peerC
     /* disconnect if it's been too long since piece data has been transferred.
      * this is on a sliding scale based on number of available peers... */
     {
-        auto const relaxStrictnessIfFewerThanN = int(getMaxPeerCount(tor) * 0.9 + 0.5);
+        auto const relaxStrictnessIfFewerThanN = std::lround(getMaxPeerCount(tor) * 0.9);
         /* if we have >= relaxIfFewerThan, strictness is 100%.
          * if we have zero connections, strictness is 0% */
         float const strictness = peerCount >= relaxStrictnessIfFewerThanN ? 1.0 :
@@ -2943,7 +2940,7 @@ static bool swarmIsAllSeeds(tr_swarm* swarm)
 }
 
 /** @return an array of all the atoms we might want to connect to */
-static std::vector<peer_candidate> getPeerCandidates(tr_session const* session, size_t max)
+static std::vector<peer_candidate> getPeerCandidates(tr_session* session, size_t max)
 {
     time_t const now = tr_time();
     uint64_t const now_msec = tr_time_msec();

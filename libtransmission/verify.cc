@@ -1,5 +1,5 @@
 // This file Copyright © 2007-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -38,7 +38,7 @@ static bool verifyTorrent(tr_torrent* tor, bool const* stopFlag)
     time_t lastSleptAt = 0;
     uint32_t piecePos = 0;
     tr_file_index_t fileIndex = 0;
-    tr_file_index_t prevFileIndex = !fileIndex;
+    tr_file_index_t prevFileIndex = ~fileIndex;
     tr_piece_index_t piece = 0;
     auto buffer = std::vector<std::byte>(1024 * 256);
     auto sha = tr_sha1_init();

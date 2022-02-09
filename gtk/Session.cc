@@ -145,7 +145,7 @@ private:
     void on_pref_changed(tr_quark key);
 
     void on_torrent_completeness_changed(tr_torrent* tor, tr_completeness completeness, bool was_running);
-    void on_torrent_metadata_changed(tr_torrent const* tor);
+    void on_torrent_metadata_changed(tr_torrent* tor);
 
 private:
     Session& core_;
@@ -271,29 +271,25 @@ bool is_valid_eta(int t)
 
 int compare_eta(int a, int b)
 {
-    int ret;
-
     bool const a_valid = is_valid_eta(a);
     bool const b_valid = is_valid_eta(b);
 
     if (!a_valid && !b_valid)
     {
-        ret = 0;
-    }
-    else if (!a_valid)
-    {
-        ret = -1;
-    }
-    else if (!b_valid)
-    {
-        ret = 1;
-    }
-    else
-    {
-        ret = a < b ? 1 : -1;
+        return 0;
     }
 
-    return ret;
+    if (!a_valid)
+    {
+        return -1;
+    }
+
+    if (!b_valid)
+    {
+        return 1;
+    }
+
+    return a < b ? 1 : -1;
 }
 
 int compare_double(double a, double b)
@@ -896,15 +892,13 @@ Gtk::TreeModel::iterator find_row_from_torrent_id(Glib::RefPtr<Gtk::TreeModel> c
 
 /* this is called in the libtransmission thread, *NOT* the GTK+ thread,
    so delegate to the GTK+ thread before changing our list store... */
-void Session::Impl::on_torrent_metadata_changed(tr_torrent const* tor)
+void Session::Impl::on_torrent_metadata_changed(tr_torrent* tor)
 {
     Glib::signal_idle().connect(
         [this, core = get_core_ptr(), torrent_id = tr_torrentId(tor)]()
         {
-            auto const* const tor2 = tr_torrentFindFromId(session_, torrent_id);
-
             /* update the torrent's collated name */
-            if (tor2 != nullptr)
+            if (auto const* const tor2 = tr_torrentFindFromId(session_, torrent_id); tor2 != nullptr)
             {
                 if (auto const iter = find_row_from_torrent_id(raw_model_, torrent_id); iter)
                 {
@@ -925,7 +919,7 @@ void Session::Impl::on_torrent_metadata_changed(tr_torrent const* tor)
 namespace
 {
 
-unsigned int build_torrent_trackers_hash(tr_torrent const* tor)
+unsigned int build_torrent_trackers_hash(tr_torrent* tor)
 {
     auto hash = uint64_t{};
 
@@ -1321,24 +1315,20 @@ namespace
 
 int gtr_compare_double(double const a, double const b, int decimal_places)
 {
-    int ret;
     auto const ia = int64_t(a * pow(10, decimal_places));
     auto const ib = int64_t(b * pow(10, decimal_places));
 
     if (ia < ib)
     {
-        ret = -1;
-    }
-    else if (ia > ib)
-    {
-        ret = 1;
-    }
-    else
-    {
-        ret = 0;
+        return -1;
     }
 
-    return ret;
+    if (ia > ib)
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 void update_foreach(Gtk::TreeModel::Row const& row)

@@ -1,5 +1,5 @@
 // This file Copyright 2010-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -357,7 +357,7 @@ int tr_cacheReadBlock(
 {
     int err = 0;
 
-    if (auto* cb = findBlock(cache, torrent, piece, offset); cb != nullptr)
+    if (auto* const cb = findBlock(cache, torrent, piece, offset); cb != nullptr)
     {
         evbuffer_copyout(cb->evbuf, setme, len);
     }
@@ -452,7 +452,9 @@ int tr_cacheFlushTorrent(tr_cache* cache, tr_torrent* torrent)
     /* flush out all the blocks in that torrent */
     while (err == 0 && pos < tr_ptrArraySize(&cache->blocks))
     {
-        if (auto const* b = static_cast<struct cache_block const*>(tr_ptrArrayNth(&cache->blocks, pos)); b->tor != torrent)
+        auto const* b = static_cast<struct cache_block const*>(tr_ptrArrayNth(&cache->blocks, pos));
+
+        if (b->tor != torrent)
         {
             break;
         }

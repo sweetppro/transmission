@@ -1,5 +1,5 @@
 // This file Copyright © 2007-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -707,7 +707,7 @@ static void pokeBatchPeriod(tr_peerMsgsImpl* msgs, int interval)
     }
 }
 
-static void dbgOutMessageLen(tr_peerMsgsImpl const* msgs)
+static void dbgOutMessageLen(tr_peerMsgsImpl* msgs)
 {
     dbgmsg(msgs, "outMessage size is now %zu", evbuffer_get_length(msgs->outMessages));
 }
@@ -1306,9 +1306,7 @@ static void parseUtPex(tr_peerMsgsImpl* msgs, uint32_t msglen, struct evbuffer* 
     auto* tmp = tr_new(char, msglen);
     tr_peerIoReadBytes(msgs->io, inbuf, tmp, msglen);
 
-    tr_variant val;
-
-    if (tr_variantFromBuf(&val, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, { tmp, msglen }))
+    if (tr_variant val; tr_variantFromBuf(&val, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, { tmp, msglen }))
     {
         uint8_t const* added = nullptr;
         auto added_len = size_t{};
@@ -1410,7 +1408,7 @@ static ReadState readBtLength(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, siz
     return READ_NOW;
 }
 
-static ReadState readBtMessage(tr_peerMsgsImpl*, struct evbuffer*, size_t);
+static ReadState readBtMessage(tr_peerMsgsImpl* /*msgs*/, struct evbuffer* /*inbuf*/, size_t /*inlen*/);
 
 static ReadState readBtId(tr_peerMsgsImpl* msgs, struct evbuffer* inbuf, size_t inlen)
 {
@@ -2129,11 +2127,10 @@ static size_t fillOutputBuffer(tr_peerMsgsImpl* msgs, time_t now)
         auto ok = bool{ false };
 
         auto dataLen = size_t{};
-        auto* data = static_cast<char*>(tr_torrentGetMetadataPiece(msgs->torrent, piece, &dataLen));
 
-        if (data != nullptr)
+        if (auto* data = static_cast<char*>(tr_torrentGetMetadataPiece(msgs->torrent, piece, &dataLen)); data != nullptr)
         {
-            evbuffer* const out = msgs->outMessages;
+            auto* const out = msgs->outMessages;
 
             /* build the data message */
             auto tmp = tr_variant{};

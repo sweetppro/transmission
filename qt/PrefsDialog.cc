@@ -1,5 +1,5 @@
 // This file Copyright © 2009-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -152,7 +152,7 @@ QString qtDayName(int day)
 
     default:
         assert(false && "Invalid day of week");
-        return QString();
+        return {};
     }
 }
 
@@ -276,7 +276,9 @@ void PrefsDialog::lineEditingFinished()
 
     if (pref_widget.is<QLineEdit>())
     {
-        if (auto const* const line_edit = pref_widget.as<QLineEdit>(); line_edit->isModified())
+        auto const* const line_edit = pref_widget.as<QLineEdit>();
+
+        if (line_edit->isModified())
         {
             setPref(pref_widget.getPrefKey(), line_edit->text());
         }

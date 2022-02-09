@@ -1,5 +1,5 @@
 // This file Copyright 2021-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -129,6 +129,7 @@ tr_quark tr_announce_list::announceToScrape(tr_quark announce)
     {
         return tr_quark_new(*scrape_str);
     }
+
     return TR_KEY_NONE;
 }
 

@@ -1,5 +1,5 @@
 // This file Copyright © 2013-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -436,7 +436,8 @@ std::optional<tr_quark> tr_quark_lookup(std::string_view key)
     /* was it added during runtime? */
     auto const rbegin = std::begin(my_runtime);
     auto const rend = std::end(my_runtime);
-    if (auto const rit = std::find(rbegin, rend, key); rit != rend)
+    auto const rit = std::find(rbegin, rend, key);
+    if (rit != rend)
     {
         return TR_N_KEYS + std::distance(rbegin, rit);
     }

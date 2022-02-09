@@ -1,5 +1,5 @@
 // This file Copyright © 2007-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -199,7 +199,7 @@ static std::string sanitizeToken(std::string_view in)
     // remove trailing spaces and '.'
     auto constexpr trailing_test = [](unsigned char ch)
     {
-        return isspace(ch) || ch == '.';
+        return (isspace(ch) != 0) || ch == '.';
     };
     auto const rit = std::find_if_not(std::rbegin(in), std::rend(in), trailing_test);
     in.remove_suffix(std::distance(std::rbegin(in), rit));

@@ -1,5 +1,5 @@
 // This file Copyright © 2008-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -213,7 +213,8 @@ static void write_block_func(void* vdata)
     struct tr_webseed* const w = data->webseed;
     struct evbuffer* const buf = data->content;
 
-    if (auto* const tor = tr_torrentFindFromId(data->session, data->torrent_id); tor != nullptr)
+    auto* const tor = tr_torrentFindFromId(data->session, data->torrent_id);
+    if (tor != nullptr)
     {
         uint32_t const block_size = tor->blockSize();
         uint32_t len = evbuffer_get_length(buf);
@@ -308,7 +309,7 @@ static void on_content_changed(struct evbuffer* buf, struct evbuffer_cb_info con
                     session,
                     connection_succeeded,
                     new connection_succeeded_data{ w,
-                                                   real_url ? real_url : "",
+                                                   real_url != nullptr ? real_url : "",
                                                    task->piece_index,
                                                    task->piece_offset + task->blocks_done * task->block_size + len - 1 });
             }

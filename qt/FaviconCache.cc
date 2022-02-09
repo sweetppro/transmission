@@ -1,5 +1,5 @@
 // This file Copyright © 2012-2022 Mnemosyne LLC.
-// It may be used under GPLv2 (SPDX: GPL-2.0), GPLv3 (SPDX: GPL-3.0),
+// It may be used under GPLv2 (SPDX: GPL-2.0-only), GPLv3 (SPDX: GPL-3.0-only),
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
@@ -122,8 +122,7 @@ void FaviconCache::ensureCacheDirHasBeenScanned()
     // load the cached favicons
     auto cache_dir = QDir(getCacheDir());
     cache_dir.mkpath(cache_dir.absolutePath());
-    QStringList const files = cache_dir.entryList(QDir::Files | QDir::Readable);
-    for (auto const& file : files)
+    for (auto const& file : cache_dir.entryList(QDir::Files | QDir::Readable))
     {
         QPixmap pixmap(cache_dir.absoluteFilePath(file));
         if (!pixmap.isNull())
@@ -167,7 +166,7 @@ FaviconCache::Key FaviconCache::getKey(QString const& displayName)
 
 QSize FaviconCache::getIconSize()
 {
-    return QSize(16, 16);
+    return { 16, 16 };
 }
 
 QPixmap FaviconCache::find(Key const& key)
